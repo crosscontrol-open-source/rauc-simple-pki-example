@@ -1,0 +1,13 @@
+[update]
+compatible=CrossControl V700
+version=1.0.0
+description=Rauc example package
+
+[bundle]
+format=verity
+
+[image.rootfs]
+filename=ccpilot-v700-release-v700.ext4
+
+[image.appfs]
+filename=appfs.ext4

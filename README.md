@@ -3,9 +3,10 @@
 
 This repository contains a collection of helper scripts and examples designed to streamline the creation of RAUC update bundles for CrossControl CCpilot displays. The scripts helps to automate the steps required to package application filesystem (appfs) and Linux OS (rootfs) into signed, deployable update artifacts. This guide covers two workflows depending on your deployment stage.
 
-## Prerequirements
+## Prerequisites 
 
-Each CCLinux SDK contains an x86_64 compiled version of the rauc tool used for creation and manipulation of RAUC bundles. The SDK can be downloaded from CrossControl website. Modify alternative SDK installation path in file conf.sh. 
+The examples require RAUC to be installed on the development computer. CCLinux OS includes an up-to-date version of the tool, and to ensure full compatibility, it is recommended to use the same version during development. Each CCLinux SDK provides an x86_64-compiled RAUC binary for creating and managing RAUC bundles. The SDK can be downloaded from the CrossControl website.
+After installing the SDK, update the SDK installation path in conf.sh.
 
 ## Example 1 - Build package using CrossControl demo keys for a CCPilot display
 
@@ -70,39 +71,32 @@ Each CCpilot display type has a unique string to identify the unit. A CCPilot V7
 Note about appfs folder: RAUC requires the appfs image to be at least 4k in size. If only adding a small file to the appfs folder, the script will fail.
 
 ## Demo keys used to sign first package used to replace standard CC keys
-cc-demo-keys
+cc-demo-keys  
 cc-demo-keys/old-keys (used in CCLinux 4.0 and 4.1)        
 
-### Folder where the CrossControl rootfs bundle is stored, also extract script in here
-### Used when building full OS+Apps bundle 
+## Helper scripts for extracting or re-signing CrossControl RAUC bundles
 cclinux-rauc-bundles  
 
 ## Release folders
-### Create one for each new release
-
-customer-initialization-1.0.0
+customer-initialization-1.0.0  
 release-full-1.0.0  
 
 ## Build Scripts
-
 build-initialization-bundle.sh  
 build-full-release.sh           
 build-full-release-with-demo-keys.sh
 
 ## Helper scripts
-
 generate-ca.sh      
 generate-login-key.sh  
-generate-appfs-ext4.sh
-cclinux-os-bundles/extract-bundle.sh
+generate-appfs-ext4.sh  
+cclinux-os-bundles/extract-bundle.sh  
 cclinux-os-bundles/resign-bundle.sh
 
 ## Output folders generated from helper scripts
-
 openssl-login       
 openssl-ca                
 
 ## Output bundles produced by this example
-
-initialization-1.0.0.raubc
+initialization-1.0.0.raubc  
 install-package-1.0.0.raucb

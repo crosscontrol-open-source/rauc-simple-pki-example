@@ -11,11 +11,21 @@ VERSION=1.0.0
 BUNDLE_NAME="initialization-$VERSION.raucb"
 FOLDER_NAME=customer-initialization-$VERSION
 
-# Copy hash version of root ca and crl to a tar archive
-tar -cf $PWD/$FOLDER_NAME/certs.tar -C openssl-ca/root/hash .
+# Copy hash version of root CA and CRL for device keyring
+tar -cf $FOLDER_NAME/certs.tar -C openssl-ca/root/hash .
 
-# Copy login key to be able to disable password login
-cp $PWD/openssl-login/ccpilot-login-key.pub $PWD/$FOLDER_NAME/authorized_keys
+# Copy SSH authorized key to enable keyless login
+cp $PWD/openssl-login/ccpilot-login-key.pub $FOLDER_NAME/authorized_keys
+
+# Generate systemd drop-in so the RAUC service can access the OP-TEE PKCS#11 token.
+# The PIN is read from conf.sh and embedded here — it grants access to the
+# decryption key stored in OP-TEE, which itself is protected by CAAM.
+mkdir -p $FOLDER_NAME/rauc.service.d
+cat > $FOLDER_NAME/rauc.service.d/pkcs11-decrypt.conf << EOF
+[Service]
+Environment=RAUC_PKCS11_MODULE=$PKCS11_MODULE
+Environment=RAUC_PKCS11_PIN=$PKCS11_USER_PIN
+EOF
 
 # Remove old bundle
 rm -f $BUNDLE_NAME
@@ -28,3 +38,4 @@ $RAUC_BIN bundle \
     --cert=$DEMO_CERT \
     $FOLDER_NAME \
     $BUNDLE_NAME
+

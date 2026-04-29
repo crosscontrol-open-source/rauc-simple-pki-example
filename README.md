@@ -57,6 +57,68 @@ Options: `./build-all.sh --version 2.0.0 --appfs-size 800 --generate-ca --genera
 11. Install the newly created **install-package-1.0.0.raucb** bundle by copy it to a USB stick and insert it to the display. The display will reboot after installation.
 
 
+## Example 3 - Encrypted bundles using OP-TEE PKCS#11 on a CCPilot V700
+
+This example extends Example 2 by adding RAUC bundle encryption. Bundles are
+encrypted on the build host using an RSA public key. Only a device that holds
+the matching private key inside its OP-TEE secure storage (backed by the i.MX8
+CAAM crypto engine) can decrypt and install the bundle.
+
+The flow has two distinct phases: **key setup** (done once, or once per key
+rotation) and **device provisioning** (done once per device).
+
+### Key setup (done once)
+
+1. Run `./generate-ca.sh` to create the PKI used for bundle signing (same as Example 2).
+2. Run `./generate-enc-key.sh` to create the RSA encryption key pair.
+   - `bundle-enc-key/rauc-enc.key.pem` — private key, stays on the build host.
+   - `bundle-enc-key/rauc-enc.cert.pem` — public certificate, committed to the repo and used when encrypting bundles.
+
+### Device provisioning (done once per device)
+
+3. Run `./provision-device-optee.sh [user@host]` to import the private key into the device's OP-TEE PKCS#11 token.
+   The script connects over SSH, initialises the PKCS#11 token if needed, imports the key into CAAM-backed secure storage, then deletes the plaintext copy from the device.
+   The default target host is set by `DEVICE_HOST` in `conf.sh`.
+
+### Build and install initialization bundle
+
+4. Run `./generate-login-key.sh` to create an SSH key pair for keyless login.
+5. Run `./build-initialization-bundle.sh` to create `initialization-1.0.0.raucb`.
+   This bundle deploys:
+   - The new root CA certificate (replacing the CC demo cert).
+   - The updated `system.conf` with the `[encryption]` section pointing to the OP-TEE key.
+   - A systemd drop-in (`rauc.service.d/pkcs11-decrypt.conf`) that provides the PKCS#11 PIN to the RAUC service.
+6. Install `initialization-1.0.0.raucb` on the device (USB or `rauc install`). Reboot.
+
+### Build and install an encrypted release bundle
+
+7. Prepare `release-full-1.0.0/` as in Example 2 (rootfs + appfs images, correct manifest).
+8. Run `./build-full-release-encrypted.sh` to create `install-package-encrypted-1.0.0.raucb`.
+   The script runs two steps internally:
+   - `rauc bundle --format=crypt` — signs the bundle and AES-encrypts the payload.
+   - `rauc encrypt --to bundle-enc-key/rauc-enc.cert.pem` — wraps the AES key with the RSA public key.
+9. Install `install-package-encrypted-1.0.0.raucb` on the provisioned device. The RAUC service will use the OP-TEE private key to unwrap the AES key and install the bundle.
+
+> **Note:** `rauc info` on an encrypted bundle requires the same PKCS#11 environment variables that the systemd service has. Run it as:
+> ```
+> RAUC_PKCS11_MODULE=/usr/lib/libckteec.so.0 RAUC_PKCS11_PIN=1234 rauc info install-package-encrypted-1.0.0.raucb
+> ```
+
+### Key strategy note
+
+This demo uses a single key pair shared by all devices. For production deployments consider:
+
+- **Batch keys** — one key pair per manufacturing batch. A compromised batch key only affects that batch.
+- **Per-device keys** — maximum isolation. Each device has a unique key pair registered in a device management system.
+
+To encrypt for multiple recipients, concatenate their certificates before running `build-full-release-encrypted.sh`:
+
+```bash
+cat bundle-enc-key/batch-A.cert.pem bundle-enc-key/batch-B.cert.pem > /tmp/recipients.pem
+```
+
+Then update `RECIPIENTS_CERT` in `build-full-release-encrypted.sh` to point to `/tmp/recipients.pem`.
+
 ## Detailed description of example 2.
 
 The helper scripts should be executed first. First run the **generate-ca.sh** script to create a simple CA setup. The output folder **openssl-ca** folder will after this contain a PKI setup with a Root CA, several developer certificates and Release CA. The build scripts can be modified to use
@@ -110,18 +172,23 @@ build-all.sh — automated custom keys workflow
 build-initialization-bundle.sh
 build-full-release.sh
 build-full-release-with-demo-keys.sh
+build-full-release-encrypted.sh — encrypted bundle workflow (Example 3)
 
 ## Helper scripts
 generate-ca.sh
 generate-login-key.sh
+generate-enc-key.sh — one-time encryption key pair generation (Example 3)
 generate-appfs-ext4.sh
+provision-device-optee.sh — per-device OP-TEE provisioning (Example 3)
 cclinux-os-bundles/extract-bundle.sh
 cclinux-os-bundles/resign-bundle.sh
 
 ## Output folders generated from helper scripts
 openssl-login
 openssl-ca
+bundle-enc-key — encryption key pair (rauc-enc.key.pem gitignored, rauc-enc.cert.pem committed)
 
 ## Output bundles produced by this example
 initialization-1.0.0.raubc
 install-package-1.0.0.raucb
+install-package-encrypted-1.0.0.raucb — encrypted bundle (Example 3)

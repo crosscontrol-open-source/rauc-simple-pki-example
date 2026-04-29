@@ -35,10 +35,21 @@ rm /data/rauc/certs/*
 # Copy new generated certs in hash form to certs folder
 tar -xf $RAUC_BUNDLE_MOUNT_POINT/certs.tar -C /data/rauc/certs
 
-# Configure keyless login  instead of default password
+# Configure keyless login instead of default password
 mkdir -p /data/home/ccs/.ssh
 cp $RAUC_BUNDLE_MOUNT_POINT/authorized_keys /data/home/ccs/.ssh
 cp $RAUC_BUNDLE_MOUNT_POINT/sshd_config /etc/ssh/
+
+# Deploy RAUC system.conf with [encryption] section pointing to OP-TEE PKCS#11
+cp $RAUC_BUNDLE_MOUNT_POINT/system.conf /etc/rauc/system.conf
+
+# Install systemd drop-in so the RAUC service has the PKCS#11 PIN at runtime.
+# The private decryption key lives in OP-TEE. The PIN unlocks
+# access to it for the RAUC service.
+# The file is generated into rauc.service.d/ by build-initialization-bundle.sh.
+mkdir -p /etc/systemd/system/rauc.service.d
+cp $RAUC_BUNDLE_MOUNT_POINT/rauc.service.d/pkcs11-decrypt.conf \
+   /etc/systemd/system/rauc.service.d/pkcs11-decrypt.conf
 
 # Configure firewall, replace with a new iptables.rules 
 #cp $RAUC_BUNDLE_MOUNT_POINT/iptables.rules /etc/iptables/

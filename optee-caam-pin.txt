@@ -1,0 +1,260 @@
+PKCS#11 PIN Handling for RAUC Encryption on i.MX8 (CrossControl V700)
+=====================================================================
+
+Background
+----------
+RAUC uses a PKCS#11 token inside OP-TEE to store the RSA private key that
+decrypts incoming update bundles. Accessing that key requires a user PIN at
+runtime. The question is how to supply that PIN to the RAUC service without
+storing it in source code or in a shared host-side configuration.
+
+
+Current project approach
+------------------------
+The project now uses the simplest working model:
+
+1. During provisioning, `provision-device-optee.sh` generates a random
+   per-device PIN with `openssl rand -hex 16`.
+2. The script writes that value directly in systemd `EnvironmentFile` format:
+
+     /data/rauc/pkcs11-pin.env
+
+     RAUC_PKCS11_PIN=<random hex value>
+
+3. The file is stored with mode 600 and owned by root.
+4. The RAUC service drop-in loads it directly with:
+
+     EnvironmentFile=-/data/rauc/pkcs11-pin.env
+
+`rauc.service` reads the PIN directly from the persistent file.
+
+
+Security properties
+-------------------
+- The PIN is not stored in any source file or config file.
+- Each device gets a different PIN because provisioning generates a fresh
+  random value locally on that device.
+- The PIN is stored only in `/data/rauc/pkcs11-pin.env`, mode 600, root-only.
+- Root access is required to read the file. On an embedded device where root
+  is already required for software updates, this matches the expected security
+  boundary.
+- If the device is re-provisioned, a new random PIN is generated and the token
+  is re-initialized.
+- The private RSA key itself is not stored in this file; it stays inside the
+  OP-TEE PKCS#11 token backed by RPMB secure storage.
+
+
+Provisioning procedure (done once per device)
+----------------------------------------------
+1. Run generate-enc-key.sh once on the build host to create the RSA key pair.
+
+2. Run provision-device-optee.sh for each device:
+   - Copies the RSA private key to the device over SSH (to /tmp only).
+   - On the device (as root via sudo):
+     a. Generates a random PKCS#11 PIN.
+     b. Writes `/data/rauc/pkcs11-pin.env` in `EnvironmentFile` format.
+     c. Initializes the OP-TEE PKCS#11 token with that PIN.
+     d. Imports the RSA private key and certificate into the token.
+     e. Deletes all plaintext copies from /tmp.
+
+3. Run build-initialization-bundle.sh to create the initialization bundle.
+   This bundle contains:
+   - pkcs11-decrypt.conf: drop-in that makes `rauc.service` load `/data/rauc/pkcs11-pin.env`
+   - system.conf: RAUC configuration with [encryption] pointing to the OP-TEE key
+   - certs.tar: the new root CA certificate hash replacing the CC demo certificate
+   - authorized_keys: SSH public key replacing the default password login
+
+4. Install the initialization bundle on the device (USB or rauc install).
+   After this the device:
+   - Only accepts bundles signed by the customer PKI
+   - Only accepts encrypted bundles if the OP-TEE key matches
+   - Loads the PKCS#11 PIN directly from the root-only EnvironmentFile
+
+Note on SSH access: a fresh device (before the initialization bundle) uses
+password authentication. After the initialization bundle is installed, only
+SSH key authentication works. Set DEVICE_SSH_KEY in conf.sh to the private
+key path (openssl-login/ccpilot-login-key) before running provision-device-optee.sh
+on an already-initialized device.
+
+
+CAAM overview
+=============
+
+What CAAM is
+-------------
+CAAM (Cryptographic Acceleration and Assurance Module) is the hardware crypto
+engine built into NXP i.MX processors including the i.MX8 on the V700. It
+handles AES, RSA, ECC, SHA and random number generation in hardware, offloading
+work from the CPU and providing operations that are faster and more
+power-efficient than software implementations.
+
+Beyond acceleration, CAAM provides a key management feature: keys can be stored
+and used inside CAAM without ever being readable in software. This is the
+"black key" and "black blob" mechanism described below.
+
+CAAM is accessible from Linux through the kernel crypto API (AF_ALG sockets,
+dm-crypt) and from OP-TEE (the Trusted Execution Environment), where it backs
+the secure storage that the PKCS#11 token uses.
+
+
+Key types in CAAM
+-----------------
+There are three levels:
+
+  Red key:    A plaintext key in memory. Ordinary software key material.
+              No CAAM-specific protection.
+
+  Black key:  A key encrypted by CAAM using the JDKEK (Job Descriptor Key
+              Encryption Key). The JDKEK is a 256-bit AES key generated
+              randomly by the CAAM driver each time the system boots. A black
+              key can be passed directly to a CAAM job descriptor for crypto
+              operations without the kernel or userspace ever seeing the
+              plaintext. However, since JDKEK is regenerated each boot, a
+              black key produced in one boot session cannot be decoded in
+              another. Black keys are session-specific.
+
+  Black blob: A key encrypted by CAAM using the OTPMK (One-Time Programmable
+              Master Key). The OTPMK is a 256-bit key burned into eFuses on
+              the SoC at the factory. It is unique per chip and cannot be read
+              by software. A black blob produced on one device can only be
+              decrypted by the same device (same OTPMK), and the result is
+              the same on every boot. Black blobs are device-specific and
+              persistent.
+
+The OTPMK is also called the "device master key" or "hardware unique key" in
+NXP documentation. It is what makes CAAM security hardware-rooted: without
+physical access to the SoC and the ability to read fuses (which is typically
+disabled by setting the SEC_CONFIG fuse), the OTPMK cannot be recovered.
+
+
+How a black blob is structured
+--------------------------------
+When caam-keygen create produces a .bb file, the file layout is:
+
+  Bytes 0-3:   Magic number / format marker
+  Bytes 4-7:   Padding / reserved
+  Bytes 8-11:  Key type field
+  Bytes 12-15: Key size in bytes (e.g. 0x20 = 32)
+  Bytes 16-19: Blob size
+  Bytes 20+:   The encrypted blob body (OTPMK-protected ciphertext)
+
+The encrypted portion includes a random modifier that CAAM mixed into the
+encryption. That modifier is embedded in the blob body, which is why CAAM can
+always decrypt the same blob: the modifier is stored alongside the ciphertext
+and the OTPMK never changes.
+
+caam-keygen subcommands
+------------------------
+The caam-keygen tool (from the imx-secure-enclave package) exposes three
+subcommands. All operations run against /dev/caam-keygen and the output file
+name must be given as a relative path while the working directory is
+/data/caam (the kernel driver requires this).
+
+  create <name> <enc> -s <size>
+      Generates a random key of <size> bytes.
+      <enc> is the black key cipher mode: ecb or ccm.
+      Output: <name> (black key) and <name>.bb (black blob).
+      Example: caam-keygen create mykey ecb -s 32
+
+  import <blob_file> <name>
+      Loads an existing black blob (<blob_file>) and produces a new black key
+      (<name>) for use in the current boot session.
+      Used when you have a persistent blob and need to pass the key to a CAAM
+      job (such as dm-crypt) in the current session.
+      Example: caam-keygen import mykey.bb mykey-session
+
+  derive -pass <passphrase> -md <hash> [-S <salt>] <name>
+      Derives a key from <passphrase> using PBKDF2 with <hash>, then wraps it
+      as a black key.
+      Output: <name> (black key only, no .bb blob).
+      The derived plaintext key is deterministic, but the black key wrapping
+      changes each boot because it uses JDKEK.
+      Example: caam-keygen derive -pass "secret" -md sha256 -S "AB12CD34" mykey
+
+
+When to use derive
+-------------------
+"derive" is useful when you need a key that can be reproduced from known inputs
+and the key is only needed within the current boot session. Because the black
+key encoding changes each boot, the output file cannot be reused across boots.
+
+Good use cases for derive:
+
+  - Generating a dm-crypt key for a temporary encrypted scratch volume that is
+    only mounted during the current session. The volume is created and used in
+    one boot, decrypted from the same passphrase if needed again next boot.
+
+  - A provisioning script that creates a key, uses it immediately for a single
+    crypto operation via the kernel AF_ALG interface, and discards it. The
+    passphrase-based derivation means the same underlying key is reproducible
+    without storing anything, as long as you only consume it in the same session.
+
+  - Testing or development flows where you want repeatable key material within
+    a single run but do not need it to survive a reboot.
+
+  - Scenarios where two parties share a passphrase and need to derive the same
+    underlying key independently, using the hardware binding only to prevent
+    the black key file from being useful on another device in the same session.
+
+Do not use derive if the output file needs to be read back with stable bytes
+across reboots. The file bytes change every boot even though the underlying
+key does not. If you need to re-read the same bytes next boot, use create.
+
+
+When to use create
+-------------------
+"create" is the right choice when you need a key that is generated once,
+stays on the device, and must produce the same value each time the device
+boots. The .bb file is the persistent form and can be reloaded with "import".
+
+Good use cases for create:
+
+  - dm-crypt full-disk or partition encryption. The .bb file is stored on an
+    unencrypted partition. At each boot, "caam-keygen import" reloads the key
+    from the blob into a black key for that session, which is passed to the
+    dm-crypt setup. Only the original device can open the partition.
+
+  - A persistent device identity key used for attestation or other operations
+    that require the same key value throughout the device lifetime.
+
+  - Any stable secret used as a PIN, password, or seed that must survive
+    reboots but should not appear in plaintext in any config file or source
+    tree, when the consuming flow actually uses the CAAM-protected form.
+
+  - Generating a device-unique symmetric key for encrypting stored files,
+    audit records or logs so they cannot be read if the storage is removed.
+
+
+Relationship between create, import, and derive
+-------------------------------------------------
+A typical dm-crypt pattern on i.MX8 looks like this:
+
+  Provisioning (once):
+    cd /data/caam
+    caam-keygen create diskkey ecb -s 32
+    # diskkey.bb is saved to persistent storage.
+    # diskkey (black key) is used immediately to format the dm-crypt volume,
+    # then deleted.
+
+  Each boot (in a service or initramfs):
+    cd /data/caam
+    caam-keygen import diskkey.bb diskkey-session
+    # diskkey-session is a fresh black key wrapping the same underlying key.
+    # Pass it to dm-crypt, then delete the black key file.
+    # The volume opens correctly because the underlying key is always the same.
+
+The "derive" command is an alternative where the passphrase replaces the blob
+as the persistent anchor:
+
+  Each boot (single session only):
+    cd /data/caam
+    caam-keygen derive -pass "shared-secret" -md sha256 -S "AABBCCDD" mykey
+    # mykey is a black key valid only this session.
+    # Use it with dm-crypt for a scratch volume, then delete it.
+    # Running the same command next boot produces a different file but the
+    # same underlying key material, so the volume opens correctly.
+
+The practical difference: with "create + .bb" the blob file is the persistent
+anchor and the key is random. With "derive" the passphrase and salt are the
+anchor and the key is deterministic, but the output file is not reusable across
+boots, so you must re-derive each session rather than re-import.

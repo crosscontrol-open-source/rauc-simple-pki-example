@@ -9,7 +9,7 @@ openssl-login/
 # Generated files written into bundle folder by build-initialization-bundle.sh
 customer-initialization-1.0.0/certs.tar
 customer-initialization-1.0.0/authorized_keys
-customer-initialization-1.0.0/rauc.service.d/
+customer-initialization-1.0.0/pkcs11-decrypt.conf
 
 # Staged bundle dirs (temp)
 test-enc-bundle/

@@ -43,13 +43,12 @@ cp $RAUC_BUNDLE_MOUNT_POINT/sshd_config /etc/ssh/
 # Deploy RAUC system.conf with [encryption] section pointing to OP-TEE PKCS#11
 cp $RAUC_BUNDLE_MOUNT_POINT/system.conf /etc/rauc/system.conf
 
-# Install systemd drop-in so the RAUC service has the PKCS#11 PIN at runtime.
-# The private decryption key lives in OP-TEE. The PIN unlocks
-# access to it for the RAUC service.
-# The file is generated into rauc.service.d/ by build-initialization-bundle.sh.
+# Install systemd drop-in so the RAUC service loads the PKCS#11 PIN directly
+# from the root-only EnvironmentFile created during provisioning.
 mkdir -p /etc/systemd/system/rauc.service.d
-cp $RAUC_BUNDLE_MOUNT_POINT/rauc.service.d/pkcs11-decrypt.conf \
+cp $RAUC_BUNDLE_MOUNT_POINT/pkcs11-decrypt.conf \
    /etc/systemd/system/rauc.service.d/pkcs11-decrypt.conf
+rm -f /etc/systemd/system/rauc-pkcs11-pin.service /run/rauc-pkcs11.env
 
 # Configure firewall, replace with a new iptables.rules 
 #cp $RAUC_BUNDLE_MOUNT_POINT/iptables.rules /etc/iptables/
@@ -116,5 +115,4 @@ echo "Update complete."
 echo "<< handler [DONE]"
 
 exit 0
-
 

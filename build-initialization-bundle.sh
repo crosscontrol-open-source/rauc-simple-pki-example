@@ -17,14 +17,13 @@ tar -cf $FOLDER_NAME/certs.tar -C openssl-ca/root/hash .
 # Copy SSH authorized key to enable keyless login
 cp $PWD/openssl-login/ccpilot-login-key.pub $FOLDER_NAME/authorized_keys
 
-# Generate systemd drop-in so the RAUC service can access the OP-TEE PKCS#11 token.
-# The PIN is read from conf.sh and embedded here — it grants access to the
-# decryption key stored in OP-TEE, which itself is protected by CAAM.
-mkdir -p $FOLDER_NAME/rauc.service.d
-cat > $FOLDER_NAME/rauc.service.d/pkcs11-decrypt.conf << EOF
+# Generate the RAUC service drop-in.
+# PKCS11_MODULE comes from conf.sh; the PIN is loaded directly from a
+# root-only EnvironmentFile created during provisioning.
+cat > $FOLDER_NAME/pkcs11-decrypt.conf << EOF
 [Service]
 Environment=RAUC_PKCS11_MODULE=$PKCS11_MODULE
-Environment=RAUC_PKCS11_PIN=$PKCS11_USER_PIN
+EnvironmentFile=-$PKCS11_PIN_ENV_FILE
 EOF
 
 # Remove old bundle
@@ -38,4 +37,3 @@ $RAUC_BIN bundle \
     --cert=$DEMO_CERT \
     $FOLDER_NAME \
     $BUNDLE_NAME
-

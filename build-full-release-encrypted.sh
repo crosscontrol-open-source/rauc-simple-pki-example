@@ -1,5 +1,6 @@
 #!/bin/bash
 # NOTE: manifest.raucm in release-full-folder must use format=crypt instead of format=verity
+set -euo pipefail
 source conf.sh
 
 RAUC_BIN=$SDK_INSTALL_PATH/sysroots/x86_64-cclinuxsdk-linux/usr/bin/rauc
@@ -19,26 +20,26 @@ BUNDLE_NAME="install-package-encrypted-$VERSION.raucb"
 BUNDLE_NAME_UNENCRYPTED="install-package-unencrypted-$VERSION.raucb"
 
 # Remove old bundles
-rm -f $BUNDLE_NAME $BUNDLE_NAME_UNENCRYPTED
+rm -f "$BUNDLE_NAME" "$BUNDLE_NAME_UNENCRYPTED"
 
 # Create signed crypt-format bundle
-$RAUC_BIN bundle \
-    --conf=$RAUC_CONF \
-    --keyring=$ROOT_CA_CERT \
-    --key=$DEV_SIGN_KEY \
-    --cert=$DEV_SIGN_CERT \
-    --intermediate=$DEV_INTERMEDIATE \
-    release-full-$VERSION \
-    $BUNDLE_NAME_UNENCRYPTED
+"$RAUC_BIN" bundle \
+    "--conf=$RAUC_CONF" \
+    "--keyring=$ROOT_CA_CERT" \
+    "--key=$DEV_SIGN_KEY" \
+    "--cert=$DEV_SIGN_CERT" \
+    "--intermediate=$DEV_INTERMEDIATE" \
+    "release-full-$VERSION" \
+    "$BUNDLE_NAME_UNENCRYPTED"
 
 # Encrypt the bundle for the target device
-$RAUC_BIN encrypt \
-    --conf=$RAUC_CONF \
-    --keyring=$ROOT_CA_CERT \
-    --to $CRYPT_CERT \
-    $BUNDLE_NAME_UNENCRYPTED \
-    $BUNDLE_NAME
+"$RAUC_BIN" encrypt \
+    "--conf=$RAUC_CONF" \
+    "--keyring=$ROOT_CA_CERT" \
+    --to "$CRYPT_CERT" \
+    "$BUNDLE_NAME_UNENCRYPTED" \
+    "$BUNDLE_NAME"
 
 # Remove intermediate unencrypted bundle
-rm -f $BUNDLE_NAME_UNENCRYPTED
+rm -f "$BUNDLE_NAME_UNENCRYPTED"
 

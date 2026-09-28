@@ -32,6 +32,11 @@ Options: `./build-all-demo.sh --version 2.0.0 --appfs-size 800 --bundle path/to/
 
 ## Example 2 - Deployment work flow with customer specific keys for a CCPilot display
 
+Before installing the initialization bundle, confirm the device's `/etc/ssh/sshd_config`
+contains an active `Include /etc/ssh/sshd_config.d/*.conf` before any authentication
+settings. The bundle installs only an SSH drop-in, not a replacement `sshd_config`;
+the handler stops before changing trust settings if that Include is missing.
+
 ### Quick start (automated)
 
 1. Place a file or application in the **appfs** folder.
@@ -71,13 +76,15 @@ rotation) and **device provisioning** (done once per device).
 
 1. Run `./generate-ca.sh` to create the PKI used for bundle signing (same as Example 2).
 2. Run `./generate-enc-key.sh` to create the RSA encryption key pair.
+   Set `ENC_CERT_SUBJECT` in `conf.sh` first to choose the certificate's organization and common name.
+   Changing this setting later does not update an existing certificate; rotating the key pair requires re-provisioning every device.
    - `bundle-enc-key/rauc-enc.key.pem` (private key, stays on the build host)
    - `bundle-enc-key/rauc-enc.cert.pem` (public certificate, committed to the repo and used when encrypting bundles)
 
 ### Device provisioning (done once per device)
 
 3. Run `./provision-device-optee.sh [user@host]` to import the private key into the device's OP-TEE PKCS#11 token.
-   The script connects over SSH, initialises the PKCS#11 token if needed, imports the key into OP-TEE secure storage, writes a root-only `EnvironmentFile` at `/data/rauc/pkcs11-pin.env`, then deletes the plaintext key copy from the device.
+   The script uses one SSH login, initialises the PKCS#11 token if needed, imports the key into OP-TEE secure storage, writes a root-only `EnvironmentFile` at `/data/rauc/pkcs11-pin.env`, then deletes the plaintext key copy from the device.
    The default target host is set by `DEVICE_HOST` in `conf.sh`.
 
 ### Build and install initialization bundle
@@ -117,7 +124,7 @@ To encrypt for multiple recipients, concatenate their certificates before runnin
 cat bundle-enc-key/batch-A.cert.pem bundle-enc-key/batch-B.cert.pem > /tmp/recipients.pem
 ```
 
-Then update `RECIPIENTS_CERT` in `build-full-release-encrypted.sh` to point to `/tmp/recipients.pem`.
+Then update `CRYPT_CERT` in `build-full-release-encrypted.sh` to point to `/tmp/recipients.pem`.
 
 ## Detailed description of example 2.
 

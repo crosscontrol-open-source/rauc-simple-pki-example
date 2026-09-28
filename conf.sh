@@ -32,3 +32,4 @@ DEVICE_SSH_KEY="$PWD/openssl-login/ccpilot-login-key"
 # The public certificate is used by the build host to encrypt bundles.
 ENC_KEY_DIR="bundle-enc-key"    # rauc-enc.key.pem (private, keep secure)
                                  # rauc-enc.cert.pem (public, safe to commit)
+ENC_CERT_SUBJECT="/O=CrossControl/CN=RAUC Bundle Encryption"

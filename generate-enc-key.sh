@@ -46,7 +46,7 @@ openssl req -new -x509 \
     -key  "$KEY_FILE" \
     -out  "$CERT_FILE" \
     -days 36500 \
-    -subj "/O=CrossControl/CN=V700 RAUC Bundle Encryption" \
+    -subj "$ENC_CERT_SUBJECT" \
     2>/dev/null
 
 echo "Done. Key: $KEY_FILE  Cert: $CERT_FILE"

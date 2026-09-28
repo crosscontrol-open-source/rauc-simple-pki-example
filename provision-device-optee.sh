@@ -34,9 +34,9 @@ CERT_FILE="$SCRIPT_DIR/$ENC_KEY_DIR/rauc-enc.cert.pem"
 REMOTE_KEY="/tmp/rauc-enc.key.pem"
 REMOTE_CERT="/tmp/rauc-enc.cert.pem"
 
-SSH_OPTS="-o StrictHostKeyChecking=no"
+SSH_OPTS=(-o StrictHostKeyChecking=no)
 if [ -n "${DEVICE_SSH_KEY:-}" ] && [ -f "$DEVICE_SSH_KEY" ]; then
-    SSH_OPTS="$SSH_OPTS -i $DEVICE_SSH_KEY"
+    SSH_OPTS+=(-i "$DEVICE_SSH_KEY")
 fi
 
 if [ ! -f "$KEY_FILE" ] || [ ! -f "$CERT_FILE" ]; then
@@ -50,10 +50,7 @@ echo "Provisioning OP-TEE PKCS#11 encryption key on: $DEVICE"
 echo "  Key : $KEY_FILE"
 echo "  Cert: $CERT_FILE"
 
-scp $SSH_OPTS -q "$KEY_FILE"  "$DEVICE:$REMOTE_KEY"
-scp $SSH_OPTS -q "$CERT_FILE" "$DEVICE:$REMOTE_CERT"
-
-ssh $SSH_OPTS "$DEVICE" "sudo bash -s" << ENDSSH
+ssh "${SSH_OPTS[@]}" "$DEVICE" "sudo bash -s" << ENDSSH
 set -e
 
 PKCS11_MODULE="$PKCS11_MODULE"
@@ -65,6 +62,15 @@ ENC_KEY_LABEL="$PKCS11_ENC_KEY_LABEL"
 ENC_CERT_LABEL="$PKCS11_ENC_CERT_LABEL"
 KEY_DER="/tmp/rauc-enc.key.der"
 CERT_DER="/tmp/rauc-enc.cert.der"
+umask 077
+trap 'rm -f "$REMOTE_KEY" "$REMOTE_CERT" "\$KEY_DER" "\$CERT_DER"; systemctl start rauc.service 2>/dev/null || true' EXIT
+
+base64 -d > "$REMOTE_KEY" <<'END_ENC_KEY'
+$(base64 < "$KEY_FILE")
+END_ENC_KEY
+base64 -d > "$REMOTE_CERT" <<'END_ENC_CERT'
+$(base64 < "$CERT_FILE")
+END_ENC_CERT
 
 # Stop RAUC before re-initialising the token.
 # pkcs11-tool --init-token fails with CKR_SESSION_EXISTS if RAUC holds an
@@ -93,7 +99,6 @@ fi
 # Generate a random device-unique PKCS#11 PIN and store it in the exact
 # EnvironmentFile format consumed by rauc.service.
 USER_PIN=\$(openssl rand -hex 16)
-umask 077
 printf 'RAUC_PKCS11_PIN=%s\n' "\$USER_PIN" > "\$PIN_ENV_FILE"
 chmod 600 "\$PIN_ENV_FILE"
 rm -f /data/rauc/pkcs11-pin
@@ -131,10 +136,6 @@ pkcs11-tool --module "\$PKCS11_MODULE" \
     --id "\$ENC_KEY_ID" --label "\$ENC_CERT_LABEL" \
     > /dev/null 2>&1
 
-rm -f "$REMOTE_KEY" "$REMOTE_CERT" "\$KEY_DER" "\$CERT_DER"
-
-# Restart so RAUC picks up the new PIN immediately.
-systemctl start rauc.service 2>/dev/null || true
 ENDSSH
 
 echo "Provisioning complete."

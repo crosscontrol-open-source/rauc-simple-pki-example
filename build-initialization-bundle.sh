@@ -11,11 +11,20 @@ VERSION=1.0.0
 BUNDLE_NAME="initialization-$VERSION.raucb"
 FOLDER_NAME=customer-initialization-$VERSION
 
-# Copy hash version of root ca and crl to a tar archive
-tar -cf $PWD/$FOLDER_NAME/certs.tar -C openssl-ca/root/hash .
+# Copy hash version of root CA and CRL for device keyring
+tar -cf $FOLDER_NAME/certs.tar -C openssl-ca/root/hash .
 
-# Copy login key to be able to disable password login
-cp $PWD/openssl-login/ccpilot-login-key.pub $PWD/$FOLDER_NAME/authorized_keys
+# Copy SSH authorized key to enable keyless login
+cp $PWD/openssl-login/ccpilot-login-key.pub $FOLDER_NAME/authorized_keys
+
+# Generate the RAUC service drop-in.
+# PKCS11_MODULE comes from conf.sh; the PIN is loaded directly from a
+# root-only EnvironmentFile created during provisioning.
+cat > $FOLDER_NAME/pkcs11-decrypt.conf << EOF
+[Service]
+Environment=RAUC_PKCS11_MODULE=$PKCS11_MODULE
+EnvironmentFile=-$PKCS11_PIN_ENV_FILE
+EOF
 
 # Remove old bundle
 rm -f $BUNDLE_NAME

@@ -20,25 +20,36 @@ set -e
 echo "<< debug $*"
 echo "<< handler [STARTED]"
 
-function exit_if_empty {
-	if [ -z "$1" ]; then exit 1; fi
-}
+: "${RAUC_BUNDLE_MOUNT_POINT:?RAUC bundle mount point is required}"
 
-# Sanity check
-for i in $(env | grep "^RAUC_"); do
-	echo $i
-	exit_if_empty $i
-done
+# Leave the device's SSH configuration intact; fail before changing trust
+# settings if it does not load drop-ins.
+if ! grep -Eq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf([[:space:]]|$)' /etc/ssh/sshd_config; then
+   echo "SSH drop-ins are not enabled. Add Include /etc/ssh/sshd_config.d/*.conf to the device's sshd_config before installing." >&2
+   exit 1
+fi
 
 # Remove CC Demo cert 
 rm /data/rauc/certs/*
 # Copy new generated certs in hash form to certs folder
 tar -xf $RAUC_BUNDLE_MOUNT_POINT/certs.tar -C /data/rauc/certs
 
-# Configure keyless login  instead of default password
+# Configure keyless login instead of default password
 mkdir -p /data/home/ccs/.ssh
 cp $RAUC_BUNDLE_MOUNT_POINT/authorized_keys /data/home/ccs/.ssh
-cp $RAUC_BUNDLE_MOUNT_POINT/sshd_config /etc/ssh/
+mkdir -p /etc/ssh/sshd_config.d
+cp "$RAUC_BUNDLE_MOUNT_POINT/90-rauc-customer-sshd.conf" \
+   /etc/ssh/sshd_config.d/90-rauc-customer.conf
+
+# Deploy RAUC system.conf with [encryption] section pointing to OP-TEE PKCS#11
+cp $RAUC_BUNDLE_MOUNT_POINT/system.conf /etc/rauc/system.conf
+
+# Install systemd drop-in so the RAUC service loads the PKCS#11 PIN directly
+# from the root-only EnvironmentFile created during provisioning.
+mkdir -p /etc/systemd/system/rauc.service.d
+cp $RAUC_BUNDLE_MOUNT_POINT/pkcs11-decrypt.conf \
+   /etc/systemd/system/rauc.service.d/pkcs11-decrypt.conf
+rm -f /etc/systemd/system/rauc-pkcs11-pin.service /run/rauc-pkcs11.env
 
 # Configure firewall, replace with a new iptables.rules 
 #cp $RAUC_BUNDLE_MOUNT_POINT/iptables.rules /etc/iptables/
@@ -105,5 +116,4 @@ echo "Update complete."
 echo "<< handler [DONE]"
 
 exit 0
-
 

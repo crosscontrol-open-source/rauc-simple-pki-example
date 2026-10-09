@@ -1,5 +1,10 @@
 #!/bin/sh
 
+set -e
+
+trap 'rm -f appfs.ext4.tmp' EXIT
+rm -f appfs.ext4 appfs.ext4.tmp
+
 # Check if the directory "appfs" exists
 if [ ! -d "appfs" ]; then
     echo "Error: Folder 'appfs' does not exist! "
@@ -9,11 +14,11 @@ if [ ! -d "appfs" ]; then
     exit 1
 fi
 
-# Remove old appfs.ext4 image if existing
-rm appfs.ext4
-
-# Create an empty appfs image file with the size needed for the package. This size must be smaller or equal to the appfs partition size of this device.
-dd if=/dev/zero of=appfs.ext4 bs=100M count=8
+dd if=/dev/zero of=appfs.ext4.tmp bs=1M count=0 seek=800
 # Create an ext4 file system in the image
-mkfs.ext4 -d appfs appfs.ext4
+if ! mkfs.ext4 -F -d appfs appfs.ext4.tmp; then
+    echo "Error: Failed to create appfs filesystem image; its contents may exceed the image capacity; see the mkfs.ext4 output for details." >&2
+    exit 1
+fi
+mv appfs.ext4.tmp appfs.ext4
 
